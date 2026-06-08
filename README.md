@@ -129,3 +129,63 @@ pnpm --filter sde-intern-task-api cf-typegen
 Good luck — we're excited to see what you build, and how you stand behind it.
 
 — The DoCoDeGo team
+
+## Design Notes & Engineering Practices
+
+### Architecture & Data Persistence
+
+**Storage Strategy:** Cloudflare D1 (SQLite) was chosen for survey and response storage due to:
+- **Structured data fit:** Surveys and responses have a clear relational schema (owners → surveys → responses)
+- **Transactional safety:** D1 ensures atomic operations when saving survey definitions and responses
+- **Cost:** Free tier covers the MVP scope without additional infrastructure
+
+**Why not KV alone:** Key-value storage would require complex serialization for nested question objects and lack query flexibility for dashboard analytics.
+
+### Validation & Error Handling
+
+**Email validation:** Uses RFC 5322 simplified regex (`^[^\s@]+@[^\s@]+\.[^\s@]+$`) instead of `includes('@')` to reject edge cases:
+- `"@"` fails (no local or domain part)
+- `"user@"` fails (no domain)
+- Prevents data quality issues at the source
+
+**JSON parsing safety:** All `JSON.parse()` calls are wrapped in a `safeJsonParse()` utility with fallback values. If the database returns corrupted JSON, it gracefully returns defaults instead of crashing the endpoint.
+
+**Input validation:** Survey creation validates the shape of incoming data before writing to the database, preventing malformed records.
+
+### DRY Principle: Helper Functions
+
+**Survey row parsing:** Database queries return JSON-stringified `branding` and `questions` fields. Rather than duplicating deserialization logic in `/surveys`, `/surveys/:id`, and `/api/surveys/:id/responses`, we use:
+- `parseSurveyRow()` — Centralizes survey deserialization with error handling
+- `parseResponseRow()` — Centralizes response deserialization
+
+This eliminates code repetition and makes future schema changes easier.
+
+### Frontend Performance
+
+**Concurrent API calls:** The dashboard originally loaded survey responses serially (`for...await`), which was slow when a user had multiple surveys. Updated to use `Promise.all()` to fetch all responses in parallel, reducing load time from O(n) to O(1) from the network perspective.
+
+**Constants extraction:** Magic strings (question type labels, default colors, default prompts) are centralized in `web/src/lib/constants.ts`. Benefits:
+- Single source of truth for UI text and config values
+- Easy to adjust defaults without touching component logic
+- Supports future i18n/theme customization
+
+### Testing Approach
+
+**Two test files included:**
+1. `validation.test.ts` — Unit tests for email validation, JSON parsing, and object shape validation
+2. `api.test.ts` — Integration test skeleton showing the happy path: create survey → retrieve → submit responses → list responses
+
+These demonstrate:
+- Edge case validation (e.g., `"@"` should fail email validation)
+- Error handling for malformed data
+- The expected behavior of the core API flow
+
+Run with: `node api/src/validation.test.ts` or `node api/src/api.test.ts`
+
+### Future Improvements (With More Time)
+
+1. **Database schema validation:** Add Zod or similar for runtime type safety on D1 queries
+2. **Response analytics:** Add aggregation queries (counts by answer, averages for ratings)
+3. **Audit logging:** Track survey modifications and response submissions for debugging
+4. **Rate limiting:** Prevent abuse on the public response endpoint
+5. **Full test suite:** Integration tests against a real test D1 instance

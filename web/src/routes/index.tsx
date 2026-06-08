@@ -23,7 +23,7 @@ function Home() {
             Create polished surveys, brand them, and share them in minutes.
           </h1>
           <p style={{ margin: 0, maxWidth: 760, lineHeight: 1.7 }}>
-            This demo delivers the core flow from the README: sign in, build surveys with multiple
+            This demo delivers the core flow for sign in, build surveys with multiple
             question types, customize the brand, publish a public URL, and review anonymous
             responses from your dashboard.
           </p>

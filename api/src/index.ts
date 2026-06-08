@@ -1,5 +1,7 @@
 import type { Context } from 'hono'
 import { Hono } from 'hono'
+import { ID_PREFIXES, ERROR_MESSAGES, HTTP_STATUS } from './constants'
+import { validateEmail, safeJsonParse } from './validation'
 
 interface SurveyOption {
   id: string
@@ -77,24 +79,62 @@ function now() {
   return new Date().toISOString()
 }
 
+/**
+ * Parses a raw survey row from the database into a Survey object
+ * Handles JSON deserialization with error handling
+ */
+function parseSurveyRow(row: any): Survey {
+  const branding = safeJsonParse<SurveyBranding>(row.branding, {
+    primaryColor: '#0f172a',
+    logoUrl: '',
+  })
+
+  const questions = safeJsonParse<QuestionType[]>(row.questions, [])
+
+  return {
+    id: row.id,
+    ownerId: row.owner_id,
+    title: row.title,
+    description: row.description,
+    branding: branding || { primaryColor: '#0f172a', logoUrl: '' },
+    questions: questions || [],
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  }
+}
+
+/**
+ * Parses a raw response row from the database into a SurveyResponse object
+ */
+function parseResponseRow(row: any): SurveyResponse {
+  const answers = safeJsonParse<Record<string, string>>(row.answers, {})
+
+  return {
+    id: row.id,
+    surveyId: row.survey_id,
+    answers: answers || {},
+    submittedAt: row.submitted_at,
+  }
+}
+
 /* ---------------- AUTH MIDDLEWARE ---------------- */
 async function authMiddleware(c: Context<{ Bindings: Env; Variables: Variables }>, next: () => Promise<void>) {
   const authHeader = c.req.header('Authorization')
   const token = authHeader?.replace(/^Bearer\s+/i, '').trim()
 
-  if (!token) return c.json({ error: 'Unauthorized' }, 401)
+  if (!token) return c.json({ error: ERROR_MESSAGES.UNAUTHORIZED }, HTTP_STATUS.UNAUTHORIZED)
 
   const session = await c.env.DB.prepare(
     'SELECT * FROM sessions WHERE token = ?'
   ).bind(token).first<Session>()
 
-  if (!session) return c.json({ error: 'Unauthorized' }, 401)
+  if (!session) return c.json({ error: ERROR_MESSAGES.UNAUTHORIZED }, HTTP_STATUS.UNAUTHORIZED)
 
   const owner = await c.env.DB.prepare(
     'SELECT * FROM owners WHERE id = ?'
   ).bind(session.owner_id).first<Owner>()
 
-  if (!owner) return c.json({ error: 'Unauthorized' }, 401)
+  if (!owner) return c.json({ error: ERROR_MESSAGES.UNAUTHORIZED }, HTTP_STATUS.UNAUTHORIZED)
 
   c.set('owner', owner)
   await next()
@@ -109,8 +149,8 @@ app.post('/api/auth/login', async (c) => {
   const body = (await c.req.json()) as LoginBody
   const email = body.email?.trim().toLowerCase()
 
-  if (!email?.includes('@')) {
-    return c.json({ error: 'Invalid email' }, 400)
+  if (!email || !validateEmail(email)) {
+    return c.json({ error: ERROR_MESSAGES.INVALID_EMAIL }, HTTP_STATUS.BAD_REQUEST)
   }
 
   let owner = await c.env.DB.prepare(
@@ -119,7 +159,7 @@ app.post('/api/auth/login', async (c) => {
 
   if (!owner) {
     owner = {
-      id: generateId('owner'),
+      id: generateId(ID_PREFIXES.OWNER),
       email,
     }
 
@@ -129,7 +169,7 @@ app.post('/api/auth/login', async (c) => {
   }
 
   const session: Session = {
-    token: generateId('session'),
+    token: generateId(ID_PREFIXES.SESSION),
     owner_id: owner.id,
     email: owner.email,
   }
@@ -150,7 +190,7 @@ app.post('/api/surveys', async (c) => {
   const body = (await c.req.json()) as CreateSurveyBody
 
   const survey: Survey = {
-    id: generateId('survey'),
+    id: generateId(ID_PREFIXES.SURVEY),
     ownerId: owner.id,
     title: body.title,
     description: body.description,
@@ -186,16 +226,7 @@ app.get('/api/surveys', async (c) => {
     'SELECT * FROM surveys WHERE owner_id = ?'
   ).bind(owner.id).all()
 
-  const surveys = result.results.map((s: any) => ({
-    id: s.id,
-    ownerId: s.owner_id,
-    title: s.title,
-    description: s.description,
-    branding: JSON.parse(s.branding),
-    questions: JSON.parse(s.questions),
-    createdAt: s.created_at,
-    updatedAt: s.updated_at,
-  }))
+  const surveys = result.results.map((s: any) => parseSurveyRow(s))
 
   return c.json(surveys)
 })
@@ -208,18 +239,9 @@ app.get('/api/surveys/:id', async (c) => {
     'SELECT * FROM surveys WHERE id = ? AND owner_id = ?'
   ).bind(c.req.param('id'), owner.id).first<any>()
 
-  if (!survey) return c.json({ error: 'Not found' }, 404)
+  if (!survey) return c.json({ error: ERROR_MESSAGES.NOT_FOUND }, HTTP_STATUS.NOT_FOUND)
 
-  return c.json({
-    id: survey.id,
-    ownerId: survey.owner_id,
-    title: survey.title,
-    description: survey.description,
-    branding: JSON.parse(survey.branding),
-    questions: JSON.parse(survey.questions),
-    createdAt: survey.created_at,
-    updatedAt: survey.updated_at,
-  })
+  return c.json(parseSurveyRow(survey))
 })
 
 /* ---------------- UPDATE SURVEY ---------------- */
@@ -253,7 +275,7 @@ app.post('/api/public/surveys/:id/responses', async (c) => {
   const body = (await c.req.json()) as PublicResponseBody
 
   const response: SurveyResponse = {
-    id: generateId('resp'),
+    id: generateId(ID_PREFIXES.RESPONSE),
     surveyId: c.req.param('id'),
     answers: body.answers,
     submittedAt: now(),
@@ -280,12 +302,7 @@ app.get('/api/surveys/:id/responses', async (c) => {
     'SELECT * FROM responses WHERE survey_id = ?'
   ).bind(c.req.param('id')).all()
 
-  return c.json(result.results.map((r: any) => ({
-    id: r.id,
-    surveyId: r.survey_id,
-    answers: JSON.parse(r.answers),
-    submittedAt: r.submitted_at,
-  })))
+  return c.json(result.results.map((r: any) => parseResponseRow(r)))
 })
 
 export default app

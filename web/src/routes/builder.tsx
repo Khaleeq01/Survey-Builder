@@ -1,13 +1,26 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
 import { useEffect, useMemo, useState } from 'react'
 import { createSurvey, getSurvey, updateSurvey } from '../lib/api'
+import {
+  DEFAULT_BRANDING,
+  DEFAULT_MULTIPLE_CHOICE_OPTIONS,
+  DEFAULT_QUESTION_PROMPTS,
+  DEFAULT_SURVEY_DESCRIPTION,
+  DEFAULT_SURVEY_TITLE,
+  QUESTION_TYPE_LABELS,
+  QUESTION_TYPES,
+  RATING_SCALE_DEFAULT,
+} from '../lib/constants'
 import type { CreateSurveyPayload, QuestionType, SurveyQuestion } from '../lib/types'
 
 const questionTypeOptions: Array<{ value: QuestionType; label: string }> = [
-  { value: 'text', label: 'Short text' },
-  { value: 'long_text', label: 'Long text' },
-  { value: 'multiple_choice', label: 'Multiple choice' },
-  { value: 'rating', label: '1–5 rating' },
+  { value: QUESTION_TYPES.TEXT, label: QUESTION_TYPE_LABELS[QUESTION_TYPES.TEXT] },
+  { value: QUESTION_TYPES.LONG_TEXT, label: QUESTION_TYPE_LABELS[QUESTION_TYPES.LONG_TEXT] },
+  {
+    value: QUESTION_TYPES.MULTIPLE_CHOICE,
+    label: QUESTION_TYPE_LABELS[QUESTION_TYPES.MULTIPLE_CHOICE],
+  },
+  { value: QUESTION_TYPES.RATING, label: QUESTION_TYPE_LABELS[QUESTION_TYPES.RATING] },
 ]
 
 const createOption = (value: string) => ({
@@ -18,21 +31,27 @@ const createOption = (value: string) => ({
 const buildQuestion = (type: QuestionType): SurveyQuestion => ({
   id: `${type}-${Math.random().toString(36).slice(2, 8)}`,
   type,
-  prompt: type === 'rating' ? 'How would you rate this?' : 'Question prompt',
+  prompt: DEFAULT_QUESTION_PROMPTS[type],
   required: true,
-  options: type === 'multiple_choice' ? [createOption('Option 1'), createOption('Option 2')] : [],
-  ratingScale: 5,
+  options:
+    type === QUESTION_TYPES.MULTIPLE_CHOICE
+      ? DEFAULT_MULTIPLE_CHOICE_OPTIONS.map(createOption)
+      : [],
+  ratingScale: RATING_SCALE_DEFAULT,
 })
 
 const defaultSurvey = (): CreateSurveyPayload => ({
-  title: 'New branded survey',
-  description: 'Collect feedback in a polished, shareable format.',
+  title: DEFAULT_SURVEY_TITLE,
+  description: DEFAULT_SURVEY_DESCRIPTION,
   branding: {
-    primaryColor: '#0f172a',
-    logoUrl:
-      'https://images.unsplash.com/photo-1516321497487-e288fb19713f?auto=format&fit=crop&w=120&q=80',
+    primaryColor: DEFAULT_BRANDING.PRIMARY_COLOR,
+    logoUrl: DEFAULT_BRANDING.LOGO_URL,
   },
-  questions: [buildQuestion('text'), buildQuestion('multiple_choice'), buildQuestion('rating')],
+  questions: [
+    buildQuestion(QUESTION_TYPES.TEXT),
+    buildQuestion(QUESTION_TYPES.MULTIPLE_CHOICE),
+    buildQuestion(QUESTION_TYPES.RATING),
+  ],
 })
 
 export const Route = createFileRoute('/builder')({

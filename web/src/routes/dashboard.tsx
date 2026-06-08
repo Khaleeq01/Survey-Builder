@@ -21,9 +21,15 @@ function DashboardPage() {
         const loadedSurveys = await getSurveys()
         setSurveys(loadedSurveys)
 
+        // Load all responses concurrently instead of serially
+        const responsePromises = loadedSurveys.map((survey) =>
+          getResponses(survey.id).then((responses) => ({ surveyId: survey.id, responses }))
+        )
+
+        const results = await Promise.all(responsePromises)
         const nextResponses: Record<string, SurveyResponse[]> = {}
-        for (const survey of loadedSurveys) {
-          nextResponses[survey.id] = await getResponses(survey.id)
+        for (const { surveyId, responses } of results) {
+          nextResponses[surveyId] = responses
         }
         setResponseMap(nextResponses)
       } catch (loadError) {
